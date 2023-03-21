@@ -1,0 +1,868 @@
+---
+title: "GV_Project"
+author: "Zander Mintz"
+date: "`r Sys.Date()`"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+library(data.table)
+library(tidyverse)
+library(sf)
+library(scales)
+library(purrr)
+library(tibble)
+library(knitr)
+library(tidycensus)
+library(R.utils)
+library(dendextend)
+library(colorspace)
+library(corrplot)
+library(gbm)
+library(randomForest)
+library(caret)
+library(glmnet)
+library(relaimpo)
+```
+
+```{r}
+##SVI Data
+
+SVI2018_US_COUNTY <- read_csv("SVI2018_US_COUNTY.csv")
+
+SVI_data = SVI2018_US_COUNTY %>%
+  dplyr::select(2:6, E_TOTPOP,EP_POV,EP_UNEMP,EP_PCI,EP_NOHSDP,EP_AGE65,EP_AGE17,EP_SNGPNT,EP_DISABL,EP_MINRTY,EP_LIMENG,EP_MUNIT,EP_MOBILE,EP_CROWD,EP_GROUPQ) %>%
+  dplyr::rename(total_pop = "E_TOTPOP",
+per_below_poverty_line = "EP_POV",
+unemploy_rate_16_and_up = "EP_UNEMP",
+per_capita_income = "EP_PCI",
+per_no_hs_diploma = "EP_NOHSDP",
+sixty_five_plus = "EP_AGE65",
+seventeen_and_below = "EP_AGE17",
+s_parent_and_child_below_18 = "EP_SNGPNT",
+perc_disability = "EP_DISABL",
+non_white_pop = "EP_MINRTY",
+non_english_speakers = "EP_LIMENG",
+housing_10_plus_units = "EP_MUNIT",
+mobile_homes = "EP_MOBILE",
+more_ppl_than_rooms = "EP_CROWD",
+institutionalized_groups_quarters = "EP_GROUPQ")
+
+SVI_data$FIPS = sapply(SVI_data$FIPS, function(x){if(nchar(x)<5){paste0(0,x)}else{x}})
+```
+
+```{r}
+###merge SVI and gun violence data###
+
+#import gun violence data for 2014
+
+gva_data_2014 = read_csv("gva_data_2014_fips 2.csv")
+gva_data_2015 = read_csv("gva_data_2015_fips.csv")
+gva_data_2016 = read_csv("gva_data_2016_fips_final.csv")
+gva_data_2017 = read_csv("gva_data_2017_fips.csv")
+
+#grab FIPS codes w/ state & county data
+
+data(fips_codes)
+
+fips = fips_codes %>%
+  mutate(FIPS = paste0(state_code,county_code)) %>%
+  dplyr::select(3,5:6)
+
+###2014###
+
+gva_2014 = gva_data_2014 %>%
+  dplyr::select(32,4,5,7,8,31) %>%
+  tidyr::drop_na()
+
+gva_2014$fips = sapply(gva_2014$fips, function(x){if(nchar(x)<5){paste0(0,x)}else{x}})
+
+gva_2014 = gva_2014 %>% 
+  group_by(fips) %>%
+  summarize(gun_violence = sum(n_killed,n_injured)) %>%
+  left_join(fips, by = c("fips"= "FIPS"))
+
+#merge SVI and GVA for 2014 & creating gun violence percent variable
+
+GVA_SVI_2014_data = gva_2014 %>%
+  left_join(SVI_data, by = c("fips" = "FIPS")) %>%
+  dplyr::mutate(g_viol_perc = (gun_violence / total_pop)*10000) %>%
+  dplyr::select(-2,-5,-6,-7,-8)
+
+GVA_SVI_2014_data$year = 2014
+
+###2015###
+
+gva_2015 = gva_data_2015 %>%
+  dplyr::select(32,4,5,7,8,31) %>%
+  tidyr::drop_na()
+
+gva_2015$fips = sapply(gva_2015$fips, function(x){if(nchar(x)<5){paste0(0,x)}else{x}})
+
+gva_2015 = gva_2015 %>% 
+  group_by(fips) %>%
+  summarize(gun_violence = sum(n_killed,n_injured)) %>%
+  left_join(fips, by = c("fips"= "FIPS"))
+
+#merge SVI and GVA for 2015 & creating gun violence percent variable
+
+GVA_SVI_2015_data = gva_2015 %>%
+  left_join(SVI_data, by = c("fips" = "FIPS")) %>%
+  dplyr::mutate(g_viol_perc = (gun_violence / total_pop)*10000) %>%
+  dplyr::select(-2,-5,-6,-7,-8)
+
+GVA_SVI_2015_data$year = 2015
+
+###2016###
+
+gva_2016 = gva_data_2016 %>%
+  dplyr::select(32,4,5,7,8,31) %>%
+  tidyr::drop_na()
+
+gva_2016$fips = sapply(gva_2016$fips, function(x){if(nchar(x)<5){paste0(0,x)}else{x}})
+
+gva_2016 = gva_2016 %>% 
+  group_by(fips) %>%
+  summarize(gun_violence = sum(n_killed,n_injured)) %>%
+  left_join(fips, by = c("fips"= "FIPS"))
+
+#merge SVI and GVA for 2016 & creating gun violence percent variable
+
+GVA_SVI_2016_data = gva_2016 %>%
+  left_join(SVI_data, by = c("fips" = "FIPS")) %>%
+  dplyr::mutate(g_viol_perc = (gun_violence / total_pop)*10000) %>%
+  dplyr::select(-2,-5,-6,-7,-8)
+
+GVA_SVI_2016_data$year = 2016
+
+###2017###
+
+gva_2017 = gva_data_2017 %>%
+  dplyr::select(31,3,4,6,7,30) %>%
+  tidyr::drop_na()
+
+gva_2017$fips = sapply(gva_2017$fips, function(x){if(nchar(x)<5){paste0(0,x)}else{x}})
+
+gva_2017 = gva_2017 %>% 
+  group_by(fips) %>%
+  summarize(gun_violence = sum(n_killed,n_injured)) %>%
+  left_join(fips, by = c("fips"= "FIPS"))
+
+#merge SVI and GVA for 2017 & creating gun violence percent variable
+
+GVA_SVI_2017_data = gva_2017 %>%
+  left_join(SVI_data, by = c("fips" = "FIPS")) %>%
+  dplyr::mutate(g_viol_perc = (gun_violence / total_pop)*10000) %>%
+  dplyr::select(-2,-5,-6,-7,-8)
+
+GVA_SVI_2017_data$year = 2017
+```
+
+
+```{r}
+#merging in political data into GVA and ACS data
+politics=read.csv("policy-politics-variables.csv")
+
+#2014 Politics#
+
+rep_gov_2014 = politics %>%
+  filter(Year == "2014" & Governor.Party == "Rep") %>%
+  dplyr::select(2) %>%
+  as.list()
+
+rep_leg_2014 = politics %>%
+  filter(Year == "2014" & Legislature.Control == "Rep") %>%
+  dplyr::select(2) %>%
+  as.list()
+
+dem_gov_2014 = politics %>%
+  filter(Year == "2014" & Governor.Party == "Dem") %>%
+  dplyr::select(2) %>%
+  as.list()
+
+dem_leg_2014 = politics %>%
+  filter(Year == "2014" & Legislature.Control == "Dem") %>%
+  dplyr::select(2) %>%
+  as.list()
+
+ind_gov_2014 = politics %>%
+  filter(Year == "2014" & Governor.Party == "Ind") %>%
+  dplyr::select(2) %>%
+  as.list()
+
+split_leg_2014 = politics %>%
+  filter(Year == "2014" & Legislature.Control == "Split") %>%
+  dplyr::select(2) %>%
+  as.list()
+
+GVA_SVI_Politics_2014 = GVA_SVI_2014_data %>%
+  mutate(Rep_gov = case_when(state_name %in% rep_gov_2014$State.trim ~ "1"),
+        Dem_gov = case_when(state_name %in% dem_gov_2014$State.trim ~ "1"),
+        Ind_gov = case_when(state_name %in% ind_gov_2014$State.trim ~ "1"),
+        Rep_leg = case_when(state_name %in% rep_leg_2014$State.trim ~ "1"),
+        Dem_leg = case_when(state_name %in% dem_leg_2014$State.trim ~ "1"),
+        Split_leg = case_when(state_name %in% split_leg_2014$State.trim ~ "1")) %>%
+  mutate(Rep_gov = ifelse(is.na(Rep_gov), 0, Rep_gov),
+        Dem_gov = ifelse(is.na(Dem_gov), 0, Dem_gov),
+        Ind_gov = ifelse(is.na(Ind_gov), 0, Ind_gov),
+        Rep_leg = ifelse(is.na(Rep_leg), 0, Rep_leg),
+        Dem_leg = ifelse(is.na(Dem_leg), 0, Dem_leg),
+        Split_leg = ifelse(is.na(Split_leg), 0, Split_leg)) %>%
+  drop_na()
+
+#Check all NAs in all columns
+cbind(lapply(lapply(GVA_SVI_Politics_2014, is.na), sum))
+
+#2015 Politics#
+
+rep_gov_2015 = politics %>%
+  filter(Year == "2015" & Governor.Party == "Rep") %>%
+  dplyr::select(2) %>%
+  as.list()
+
+rep_leg_2015 = politics %>%
+  filter(Year == "2015" & Legislature.Control == "Rep") %>%
+  dplyr::select(2) %>%
+  as.list()
+
+dem_gov_2015 = politics %>%
+  filter(Year == "2015" & Governor.Party == "Dem") %>%
+  dplyr::select(2) %>%
+  as.list()
+
+dem_leg_2015 = politics %>%
+  filter(Year == "2015" & Legislature.Control == "Dem") %>%
+  dplyr::select(2) %>%
+  as.list()
+
+ind_gov_2015 = politics %>%
+  filter(Year == "2015" & Governor.Party == "Ind") %>%
+  dplyr::select(2) %>%
+  as.list()
+
+split_leg_2015 = politics %>%
+  filter(Year == "2015" & Legislature.Control == "Split") %>%
+  dplyr::select(2) %>%
+  as.list()
+
+GVA_SVI_Politics_2015 = GVA_SVI_2015_data %>%
+  mutate(Rep_gov = case_when(state_name %in% rep_gov_2015$State.trim ~ "1"),
+        Dem_gov = case_when(state_name %in% dem_gov_2015$State.trim ~ "1"),
+        Ind_gov = case_when(state_name %in% ind_gov_2015$State.trim ~ "1"),
+        Rep_leg = case_when(state_name %in% rep_leg_2015$State.trim ~ "1"),
+        Dem_leg = case_when(state_name %in% dem_leg_2015$State.trim ~ "1"),
+        Split_leg = case_when(state_name %in% split_leg_2015$State.trim ~ "1")) %>%
+  mutate(Rep_gov = ifelse(is.na(Rep_gov), 0, Rep_gov),
+        Dem_gov = ifelse(is.na(Dem_gov), 0, Dem_gov),
+        Ind_gov = ifelse(is.na(Ind_gov), 0, Ind_gov),
+        Rep_leg = ifelse(is.na(Rep_leg), 0, Rep_leg),
+        Dem_leg = ifelse(is.na(Dem_leg), 0, Dem_leg),
+        Split_leg = ifelse(is.na(Split_leg), 0, Split_leg)) %>%
+  drop_na()
+
+#Check all NAs in all columns
+cbind(lapply(lapply(GVA_SVI_Politics_2015, is.na), sum))
+
+#2016 Politics#
+
+rep_gov_2016 = politics %>%
+  filter(Year == "2016" & Governor.Party == "Rep") %>%
+  dplyr::select(2) %>%
+  as.list()
+
+rep_leg_2016 = politics %>%
+  filter(Year == "2016" & Legislature.Control == "Rep") %>%
+  dplyr::select(2) %>%
+  as.list()
+
+dem_gov_2016 = politics %>%
+  filter(Year == "2016" & Governor.Party == "Dem") %>%
+  dplyr::select(2) %>%
+  as.list()
+
+dem_leg_2016 = politics %>%
+  filter(Year == "2016" & Legislature.Control == "Dem") %>%
+  dplyr::select(2) %>%
+  as.list()
+
+ind_gov_2016 = politics %>%
+  filter(Year == "2016" & Governor.Party == "Ind") %>%
+  dplyr::select(2) %>%
+  as.list()
+
+split_leg_2016 = politics %>%
+  filter(Year == "2016" & Legislature.Control == "Split") %>%
+  dplyr::select(2) %>%
+  as.list()
+
+GVA_SVI_Politics_2016 = GVA_SVI_2016_data %>%
+  mutate(Rep_gov = case_when(state_name %in% rep_gov_2016$State.trim ~ "1"),
+        Dem_gov = case_when(state_name %in% dem_gov_2016$State.trim ~ "1"),
+        Ind_gov = case_when(state_name %in% ind_gov_2016$State.trim ~ "1"),
+        Rep_leg = case_when(state_name %in% rep_leg_2016$State.trim ~ "1"),
+        Dem_leg = case_when(state_name %in% dem_leg_2016$State.trim ~ "1"),
+        Split_leg = case_when(state_name %in% split_leg_2016$State.trim ~ "1")) %>%
+  mutate(Rep_gov = ifelse(is.na(Rep_gov), 0, Rep_gov),
+        Dem_gov = ifelse(is.na(Dem_gov), 0, Dem_gov),
+        Ind_gov = ifelse(is.na(Ind_gov), 0, Ind_gov),
+        Rep_leg = ifelse(is.na(Rep_leg), 0, Rep_leg),
+        Dem_leg = ifelse(is.na(Dem_leg), 0, Dem_leg),
+        Split_leg = ifelse(is.na(Split_leg), 0, Split_leg)) %>%
+  drop_na()
+
+#Check all NAs in all columns
+cbind(lapply(lapply(GVA_SVI_Politics_2016, is.na), sum))
+
+#2017 Politics#
+
+rep_gov_2017 = politics %>%
+  filter(Year == "2017" & Governor.Party == "Rep") %>%
+  dplyr::select(2) %>%
+  as.list()
+
+rep_leg_2017 = politics %>%
+  filter(Year == "2017" & Legislature.Control == "Rep") %>%
+  dplyr::select(2) %>%
+  as.list()
+
+dem_gov_2017 = politics %>%
+  filter(Year == "2017" & Governor.Party == "Dem") %>%
+  dplyr::select(2) %>%
+  as.list()
+
+dem_leg_2017 = politics %>%
+  filter(Year == "2017" & Legislature.Control == "Dem") %>%
+  dplyr::select(2) %>%
+  as.list()
+
+ind_gov_2017 = politics %>%
+  filter(Year == "2017" & Governor.Party == "Ind") %>%
+  dplyr::select(2) %>%
+  as.list()
+
+split_leg_2017 = politics %>%
+  filter(Year == "2017" & Legislature.Control == "Split") %>%
+  dplyr::select(2) %>%
+  as.list()
+
+GVA_SVI_Politics_2017 = GVA_SVI_2017_data %>%
+  mutate(Rep_gov = case_when(state_name %in% rep_gov_2017$State.trim ~ "1"),
+        Dem_gov = case_when(state_name %in% dem_gov_2017$State.trim ~ "1"),
+        Ind_gov = case_when(state_name %in% ind_gov_2017$State.trim ~ "1"),
+        Rep_leg = case_when(state_name %in% rep_leg_2017$State.trim ~ "1"),
+        Dem_leg = case_when(state_name %in% dem_leg_2017$State.trim ~ "1"),
+        Split_leg = case_when(state_name %in% split_leg_2017$State.trim ~ "1")) %>%
+  mutate(Rep_gov = ifelse(is.na(Rep_gov), 0, Rep_gov),
+        Dem_gov = ifelse(is.na(Dem_gov), 0, Dem_gov),
+        Ind_gov = ifelse(is.na(Ind_gov), 0, Ind_gov),
+        Rep_leg = ifelse(is.na(Rep_leg), 0, Rep_leg),
+        Dem_leg = ifelse(is.na(Dem_leg), 0, Dem_leg),
+        Split_leg = ifelse(is.na(Split_leg), 0, Split_leg)) %>%
+  drop_na()
+
+#Check all NAs in all columns
+cbind(lapply(lapply(GVA_SVI_Politics_2017, is.na), sum))
+
+##Stacking all the data
+final_data = rbind(GVA_SVI_Politics_2014,GVA_SVI_Politics_2015,GVA_SVI_Politics_2016,GVA_SVI_Politics_2017)
+```
+
+```{r}
+####Methods & Analysis####
+
+##Hierarchical clustering on States to look for similarities
+  
+gva_2014$year = 2014
+gva_2015$year = 2015
+gva_2016$year = 2016
+gva_2017$year = 2017
+
+#Generate total gun_violence % variable over all years for states
+
+hc_SVI = SVI_data %>%
+  dplyr::select(STATE, total_pop) %>%
+  aggregate(total_pop ~ STATE, data = ., FUN = sum) %>%
+  mutate(STATE = tolower(STATE))
+
+hc_SVI$STATE<-str_to_title(hc_SVI$STATE)
+
+gva_total = rbind(gva_2014,gva_2015,gva_2016,gva_2017) %>%
+  aggregate(gun_violence ~ state_name, data = ., FUN = sum)
+
+gva_total$state_name<-str_to_title(gva_total$state_name)
+
+hc_data = gva_total %>%
+  left_join(hc_SVI, by = c("state_name" = "STATE")) %>%
+  dplyr::mutate(g_viol_perc = (gun_violence / total_pop)*10000) %>%
+  dplyr::select(state_name, g_viol_perc) %>%
+  mutate_at(scale, .vars = vars(g_viol_perc)) %>%
+  column_to_rownames(var = "state_name")
+
+# Dissimilarity matrix
+d <- dist(hc_data, method = "euclidean")
+
+# Hierarchical clustering using Complete, Average, Single Linkage
+hc1 <- hclust(d, method = "complete" )
+hc2 <- hclust(d, method = "average")
+hc3 <- hclust(d, method = "single")
+hc4 <- hclust(d, method = "centroid")
+
+# Plot the obtained dendrogram
+plot(hc1, cex = 1, hang = -1)
+plot(hc2, cex = 1, hang = -1)
+plot(hc3, cex = 1, hang = -1)
+
+#cut tree
+plot(hc1)
+rect.hclust(hc1, k = 5, border = 2:6)
+abline(h = 5, col = 'red')
+
+plot(hc2)
+rect.hclust(hc2, k = 5, border = 2:6)
+abline(h = 5, col = 'red')
+
+plot(hc3)
+rect.hclust(hc3, k = 5, border = 2:6)
+abline(h = 5, col = 'red')
+
+##Mapping clusters onto U.S. map##
+  
+hc_comp = cutree(hc1, k = 5)
+hc_avg = cutree(hc2, k = 5)
+hc_sing = cutree(hc3, k = 5)
+hc_cent = cutree(hc4, k = 5)
+
+map_data = hc_data %>%
+  rownames_to_column("state") %>%
+  dplyr::select(-g_viol_perc) %>%
+  mutate(hc_comp = hc_comp,
+         hc_avg = hc_avg,
+         hc_sing = hc_sing,
+         hc_cent = hc_cent) %>%
+  mutate_if(is.numeric, as.factor)
+
+##Plotting clusters onto U.S. Map##
+
+library(usmap)
+library(ggplot2)
+
+##Average Linkage##
+hc_avg_plot = plot_usmap(data = map_data, values = "hc_avg", color = "black", labels = TRUE) +
+  scale_fill_brewer(palette="Pastel2", name = "Hier. Clustering - Avg. Linkage") + 
+  theme(legend.position = "right") +
+  ggtitle("Mapping Gun Violence Data on U.S. States using Hierarchical Clustering",
+          subtitle = "(2014-2017)") +
+  theme(
+  plot.title=element_text(family='', face='bold',hjust = 0.5, size=14),
+  plot.subtitle = element_text(hjust = 0.5, face = 'bold', size = 12))
+
+##Complete Linkage##
+hc_comp_plot = plot_usmap(data = map_data, values = "hc_comp", color = "black", labels = TRUE) +
+  scale_fill_brewer(palette="Pastel2", name = "Hier. Clustering - Complete Linkage") + 
+  theme(legend.position = "right") +
+  ggtitle("Mapping Gun Violence Data on U.S. States using Hierarchical Clustering",
+          subtitle = "(2014-2017)") +
+  theme(
+  plot.title=element_text(family='', face='bold',hjust = 0.5, size=14),
+  plot.subtitle = element_text(hjust = 0.5, face = 'bold', size = 12))
+
+##Single Linkage##
+hc_sing_plot = plot_usmap(data = map_data, values = "hc_sing", color = "black", labels = TRUE) +
+  scale_fill_brewer(palette="Pastel2", name = "Hier. Clustering - Single Linkage") + 
+  theme(legend.position = "right") +
+  ggtitle("Mapping Gun Violence Data on U.S. States using Hierarchical Clustering",
+          subtitle = "(2014-2017)") +
+  theme(
+  plot.title=element_text(family='', face='bold',hjust = 0.5, size=14),
+  plot.subtitle = element_text(hjust = 0.5, face = 'bold', size = 12))
+
+##Centroid Linkage##
+hc_cent_plot = plot_usmap(data = map_data, values = "hc_cent", color = "black", labels = TRUE) +
+  scale_fill_brewer(palette="Pastel2", name = "Hier. Clustering - Centroid Linkage") + 
+  theme(legend.position = "right") +
+  ggtitle("Mapping Gun Violence Data on U.S. States using Hierarchical Clustering",
+          subtitle = "(2014-2017)") +
+  theme(
+  plot.title=element_text(family='', face='bold',hjust = 0.5, size=14),
+  plot.subtitle = element_text(hjust = 0.5, face = 'bold', size = 12))
+
+##Exploring Gun Violence Data in more complex fashion
+
+library(dendextend)
+library(colorspace)
+library(corrplot)
+
+#Complete linkage
+dend = as.dendrogram(hc1)
+dend = rotate(dend,1:51)
+dend = color_branches(dend, k=5)
+dend = hang.dendrogram(dend,hang_height=0.1)
+dend = set(dend, "labels_cex", 0.5)
+plot(dend, 
+     main = "Clustered States by Gun Violence per 100,000 people
+     (Years 2014-2017)", 
+     horiz =  TRUE,  nodePar = list(cex = .007))
+
+#Average linkage
+dend = as.dendrogram(hc2)
+dend = rotate(dend,1:51)
+dend = color_branches(dend, k=5)
+dend = hang.dendrogram(dend,hang_height=0.1)
+dend = set(dend, "labels_cex", 0.5)
+plot(dend, 
+     main = "Clustered States by Gun Violence per 100,000 people
+     (Years 2014-2017)", 
+     horiz =  TRUE,  nodePar = list(cex = .007))
+
+#Single linkage
+dend = as.dendrogram(hc3)
+dend = rotate(dend,1:51)
+dend = color_branches(dend, k=5)
+dend = hang.dendrogram(dend,hang_height=0.1)
+dend = set(dend, "labels_cex", 0.5)
+plot(dend, 
+     main = "Clustered States by Gun Violence per 100,000 people
+     (Years 2014-2017)", 
+     horiz =  TRUE,  nodePar = list(cex = .007))
+
+##Comparing different HC methods##
+
+hclust_methods <- c( "single", "complete", "average", "centroid")
+gv_dendlist <- dendlist()
+for(i in seq_along(hclust_methods)) {
+   hc_gun_violence <- hclust(d, method = hclust_methods[i])   
+   gv_dendlist <- dendlist(gv_dendlist, as.dendrogram(hc_gun_violence))
+}
+
+hclust_names = c( "Single linkage", "Complete linkage", "Average linkage", "Centroid linkage")
+
+names(gv_dendlist) <- hclust_names
+gv_dendlist
+
+gv_dendlist_cor = cor.dendlist(gv_dendlist)
+print(gv_dendlist_cor)
+
+##Checking to see how each performs against one another using cophenetic correlation (measure of how faithfully a dendrogram preserves the pairwise distances between the original unmodeled data points) between each clustering result. All clustering methods seem to yield similar results except for complete method.
+
+corrplot::corrplot(gv_dendlist_cor, "pie", "lower")
+
+png(file="saving_plot4.png", width=2000, height=1000)
+par(mfrow = c(2,2), mar=c(5.1,2.1,4.1,6.1))
+for(i in 1:4) {
+   gv_dendlist[[i]] %>% set("branches_k_color", k=4) %>% plot(axes = FALSE, horiz = TRUE)
+   title(names(gv_dendlist)[i])
+}
+dev.off()
+
+##Louisiana, Delaware, and Illinois are clustered together across all four methods. District of Colombia is an outlier when looking at all methods.Mississippi, Tennessee, South Carolina, Missouri, Alabama are clustered together across all four methods.Maryland and Alaska are similarly consistently grouped together. 
+
+##Linear Regression
+##Cleaning
+
+final_data_quant = final_data %>%
+  dplyr::select(-county, -fips) %>%
+  mutate_at(scale, .vars = vars(-g_viol_perc, -year, -Rep_gov, -Rep_leg, -Ind_gov, -Split_leg, -Dem_gov, -Dem_leg,-state_name)) %>%
+  drop_na() %>%
+  mutate_if(is.character, as.factor) %>%
+  mutate(year = as.factor(year)) %>%
+  filter(!state_name == "District of Columbia")
+
+final_data_LSR = final_data_quant %>%
+  mutate(Alabama = as.factor(ifelse(state_name == "Alabama", 1, 0)),
+          Alaska = as.factor(ifelse(state_name == "Alaska", 1, 0)),
+          Arizona = as.factor(ifelse(state_name == "Arizona", 1, 0)),
+          Arkansas = as.factor(ifelse(state_name == "Arkansas", 1, 0)),
+          California = as.factor(ifelse(state_name == "California", 1, 0)),
+          Colorado = as.factor(ifelse(state_name == "Colorado", 1, 0)),
+          Connecticut = as.factor(ifelse(state_name == "Connecticut", 1, 0)),
+          Delaware = as.factor(ifelse(state_name == "Delaware", 1, 0)),
+          District_of_Columbia = as.factor(ifelse(state_name == "District of Columbia",1,0)),
+          Florida = as.factor(ifelse(state_name == "Florida", 1, 0)),
+          Georgia = as.factor(ifelse(state_name == "Georgia", 1, 0)),
+          Hawaii = as.factor(ifelse(state_name == "Hawaii", 1, 0)),
+          Idaho = as.factor(ifelse(state_name == "Idaho", 1, 0)),
+          Illinois = as.factor(ifelse(state_name == "Illinois", 1, 0)),
+          Indiana = as.factor(ifelse(state_name == "Indiana", 1, 0)),
+          Iowa = as.factor(ifelse(state_name == "Iowa", 1, 0)),
+          Kansas = as.factor(ifelse(state_name == "Kansas", 1, 0)),
+          Kentucky = as.factor(ifelse(state_name == "Kentucky", 1, 0)),
+          Louisiana = as.factor(ifelse(state_name == "Louisiana", 1, 0)),
+          Maine = as.factor(ifelse(state_name == "Maine", 1, 0)),
+          Maryland = as.factor(ifelse(state_name == "Maryland", 1, 0)),
+          Massachusetts = as.factor(ifelse(state_name == "Massachusetts", 1, 0)),
+          Michigan = as.factor(ifelse(state_name == "Michigan", 1, 0)),
+          Minnesota = as.factor(ifelse(state_name == "Minnesota", 1, 0)),
+          Mississippi = as.factor(ifelse(state_name == "Mississippi", 1, 0)),
+          Missouri = as.factor(ifelse(state_name == "Missouri", 1, 0)),
+          Montana = as.factor(ifelse(state_name == "Montana", 1, 0)),
+          Nebraska = as.factor(ifelse(state_name == "Nebraska", 1, 0)),
+          Nevada = as.factor(ifelse(state_name == "Nevada", 1, 0)),
+          New_Hampshire = as.factor(ifelse(state_name == "New Hampshire", 1, 0)),
+          New_Jersey = as.factor(ifelse(state_name == "New Jersey", 1, 0)),
+          New_Mexico = as.factor(ifelse(state_name == "New Mexico", 1, 0)),
+          New_York = as.factor(ifelse(state_name == "New York", 1, 0)),
+          North_Carolina = as.factor(ifelse(state_name == "North Carolina", 1, 0)),
+          North_Dakota = as.factor(ifelse(state_name == "North Dakota", 1, 0)),
+          Ohio = as.factor(ifelse(state_name == "Ohio", 1, 0)),
+          Oklahoma = as.factor(ifelse(state_name == "Oklahoma", 1, 0)),
+          Oregon = as.factor(ifelse(state_name == "Oregon", 1, 0)),
+          Pennsylvania = as.factor(ifelse(state_name == "Pennsylvania", 1, 0)),
+          Rhode_Island = as.factor(ifelse(state_name == "Rhode Island", 1, 0)),
+          South_Carolina = as.factor(ifelse(state_name == "South Carolina", 1, 0)),
+          South_Dakota = as.factor(ifelse(state_name == "South Dakota", 1, 0)),
+          Tennessee = as.factor(ifelse(state_name == "Tennessee", 1, 0)),
+          Texas = as.factor(ifelse(state_name == "Texas", 1, 0)),
+          Utah = as.factor(ifelse(state_name == "Utah", 1, 0)),
+          Vermont = as.factor(ifelse(state_name == "Vermont", 1, 0)),
+          Virginia = as.factor(ifelse(state_name == "Virginia", 1, 0)),
+          Washington = as.factor(ifelse(state_name == "Washington", 1, 0)),
+          West_Virginia = as.factor(ifelse(state_name == "West Virginia", 1, 0)),
+          Wisconsin= as.factor(ifelse(state_name == "Wisconsin", 1, 0)),
+          Wyoming= as.factor(ifelse(state_name == "Wyoming", 1, 0)),
+          Year_1 = as.factor(ifelse(year == "2014", 1, 0)),
+          Year_2 = as.factor(ifelse(year == "2015", 1, 0)),
+          Year_3 = as.factor(ifelse(year == "2016", 1, 0)),
+          Year_4 = as.factor(ifelse(year == "2017", 1, 0))) %>%
+  dplyr::select(-District_of_Columbia,-Ind_gov) %>%
+  filter(!state_name == "District of Columbia")
+
+#LSR Model
+#1. Split into test/train (predictors have been re-scaled)
+set.seed(222)
+ind_LSR <- sample(2, nrow(final_data_LSR), replace = TRUE, prob = c(0.7, 0.3))
+train_LSR <- final_data_LSR[ind_LSR==1,]
+test_LSR <- final_data_LSR[ind_LSR==2,]
+
+#2. Check distribution of response, g_viol_perc
+
+ggplot(train_LSR, aes(train_LSR$g_viol_perc)) + geom_density(fill="blue") #highly skewed, long right tail (still true)
+ggplot(train_LSR, aes(log(train_LSR$g_viol_perc))) + geom_density(fill="blue") #log transform makes response distribution close to normal  (still true)
+
+#3. Run lasso regression to determine variables to use
+library(glmnet)
+
+#define matrix of predictors
+x=data.matrix(final_data_LSR[,c(-2,-17) ])
+
+#define response matrix
+y=log(final_data_LSR$g_viol_perc+1)
+
+#perform k-fold cross-validation to find optimal lambda value
+cv_model=cv.glmnet(x, y, alpha = 1)
+
+#find optimal lambda value that minimizes test MSE
+best_lambda <- cv_model$lambda.min
+best_lambda
+
+#find variables included in best model using lasso
+best_model <- glmnet(x, y, alpha = 1, lambda = best_lambda)
+coef(best_model)
+
+#LS Regression modeling using variables identified in Lasso (have removed variables that are completely correlated with others)
+reg_train = lm(log(g_viol_perc+1)~ unemploy_rate_16_and_up+per_below_poverty_line+per_capita_income+per_no_hs_diploma+sixty_five_plus+seventeen_and_below+s_parent_and_child_below_18+perc_disability+non_white_pop+non_english_speakers+housing_10_plus_units+mobile_homes+more_ppl_than_rooms+institutionalized_groups_quarters+Dem_gov+Rep_gov+Rep_leg+Split_leg+factor(year)+factor(state_name),data=train_LSR)
+reg_train_sum = summary(reg_train)
+
+#Rescale correlation coefficients
+library(relaimpo)
+re_scal=calc.relimp(reg_train, type = "lmg", rela = TRUE)
+print(re_scal)
+plot(re_scal)
+
+#RSE
+summary(reg_train)$sigma
+
+#Error rate ~ 36%
+summary(reg_train)$sigma/mean(train_LSR$g_viol_perc)
+
+
+#Test RMSE
+pred_LSR = predict(reg_train, newdata = test_LSR)
+Test_RMSE_LSR = sqrt(mean((test_LSR$g_viol_perc - pred_LSR)^2))
+print(c(RMSE = Test_RMSE_LSR, R2=reg_train_sum$adj.r.squared)) 
+Test_RMSE_LSR
+
+
+##Assumption testing
+par(mfrow = c(2,2))
+plot(reg_train)
+
+car::outlierTest(reg_train)
+lmtest::bptest(reg_train)
+car::influencePlot(reg_train, main= "Influence Plot", sub= "Circle size is proportional to Cook’s distance")
+car::vif(reg_train)
+
+#Discernable relationship == F-Stat > 1 (it is 35.77), so there is a relationship between response/predictors
+#Importance of predictors == All predictors except seventeen and below, Republican leg, Split leg, and half of dummy state variables are statistically significant
+#Model Fit == R2 of ~28% indicates model has a lot of unexplained variance
+#Model Fit == residuals appear to NOT have a discernable pattern, meaning that the underlying relationship between predictors and response could be linear
+#Normal QQ plot == residuals should be normally distributed (fall along the dotted line). Appears that this is the case for most of the residuals, but not all.
+#Scale-location == shows residual spread (equal variance). Appears residuals have equal variance.
+#Outliers == appears that there are a few outliers (3301, 5351, 4341)
+#High Leverage == appears that there may be one or two high leverage points that could be worthwhile removing (5430, 839)
+
+
+###Bagging, Random Forest, Boosting - we are using to see if there are any underlying non-linear relationships that are impacting our linear model's performance
+
+##Bagged model
+
+library(randomForest)
+library(caret)
+
+#1. Clean and Split test/train
+
+tree_data = final_data %>%
+  mutate(Year_One = case_when(year == 2014 ~ "1"),
+         Year_Two = case_when(year == 2015 ~ "1"),
+         Year_Three = case_when(year == 2016 ~ "1"),
+         Year_Four = case_when(year == 2017 ~ "1")) %>%
+  mutate_if(is.character, ~replace(., is.na(.), 0)) %>%
+  mutate_if(is.character, as.factor) %>%
+  dplyr::select(-1,-2,-3,-4,-year) %>%
+  mutate_at(scale, .vars = vars(-g_viol_perc,-Rep_gov,-Dem_gov,-Ind_gov,-Rep_leg,-Dem_leg,-Split_leg,-Year_One,-Year_Two,-Year_Three,-Year_Four))
+
+##test/train for Trees
+set.seed(222)
+ind <- sample(2, nrow(tree_data), replace = TRUE, prob = c(0.7, 0.3))
+train <- tree_data[ind==1,]
+test <- tree_data[ind==2,]
+
+#2. Run on training and use test to validate
+
+set.seed(222)
+bagged <- randomForest(g_viol_perc~., data=train, proximity=TRUE, importance = TRUE, mtry = 24)
+print(bagged)
+
+plot(bagged, main = 'Bagged Model')
+
+
+#use validation set approach to cross validate
+p_bagged = predict(bagged, test)
+Test_RMSE_bagged = sqrt(mean((p_bagged - test$g_viol_perc)^2))
+print(Test_RMSE_bagged)
+
+#Test RMSE: 1.19, % variance explained = 49%
+
+#Which variables are important relative to others?
+bag_import = importance(bagged)
+varImpPlot(bagged)
+
+#Random Forest Model
+#1. Run on non-normalized response, and no higher-order predictors
+
+set.seed(222)
+rf <- randomForest(g_viol_perc~., data=train, proximity=TRUE, importance = TRUE, mtry = 5)
+print(rf)
+
+plot(rf, main = "Random Forest Model")
+
+#use validation set approach to cross validate
+p1 = predict(rf, test)
+Test_RMSE_RF = sqrt(mean((p1 - test$g_viol_perc)^2))
+print(Test_RMSE_RF)
+
+##TEST RMSE = 1.19, % variance explained = ~50%
+
+#Which variables are important relative to others?
+rf_import = importance(rf)
+varImpPlot(rf)
+
+##unemployment rate (16+), housing 10+ units, more ppl than rooms are all relatively more important than other variables.
+
+##Boosted Model
+
+#1. Generate model w/non-normalized response, centered and scaled data. 
+
+set.seed(222)
+model_1 = train(
+  g_viol_perc~.,
+  data = train,
+  method = 'gbm',
+  preProcess = c("center", "scale"),
+  verbose = FALSE)
+
+model_1 #Interaction depth 3, shrinkage = 0.1, n.trees = 150 produce lowest RMSE (1.18) and highest R2 (~38%)
+
+plot(model_1)
+
+#1a. Perform a CV-Model, again with un-normalized response, and centered predictors.
+
+set.seed(222)
+ctrl <- trainControl(
+  method = "cv",
+  number = 10
+)
+
+model_2 = train(
+  g_viol_perc~.,
+  data = train,
+  method = 'gbm',
+  preProcess = c("center", "scale"),
+  trControl = ctrl,
+  verbose = FALSE)
+
+model_2 #Interaction depth 3, shrinkage = .1, n.trees = 150 produce lowest RMSE (1.18) & highest R2 (~38%)
+
+plot(model_2)
+
+
+##2. Tune CV-model with non-normalized response variable, centered/scaled predictors.
+
+set.seed(222)
+tuneGrid <- expand.grid(
+ n.trees = c(50,100,150,1000),
+ interaction.depth = c(1, 2, 3, 4),
+ shrinkage = c(0.1,0.001),
+ n.minobsinnode = 10
+)
+
+set.seed(222)
+model_4 = train(
+  g_viol_perc~.,
+  data = tree_data,
+  method = 'gbm',
+  metric = 'RMSE',
+  preProcess = c("center","scale"),
+  trControl = ctrl,
+  tuneGrid = tuneGrid,
+  verbose = FALSE)
+
+model_4
+plot(model_4) #tuning the CV-model with normalized response, we see that using n.tree = 1000, interaction depth = 4, and shrinkage = 0.1 provides the best overall model
+
+#3. Visualization of boosted model
+library(gbm)
+
+set.seed(222)
+imp = gbm(g_viol_perc~.,
+  distribution = "gaussian",
+  data = train,
+  n.trees = 1000,
+  interaction.depth = 4,
+  shrinkage = 0.1,
+  cv.folds = 10,
+  verbose = FALSE)
+
+par(mar = c(5,8,1,1))
+model_plot = summary.gbm(imp, cBars = 24, method = relative.influence, las = 1)
+
+##Predict using test set
+
+boost_pred = predict(model_4, newdata = test)
+Test_RMSE_Boost = sqrt(mean((boost_pred - test$g_viol_perc)^2)) #RMSE of ~1.20. Performs worse than the bagged and RF models.
+Test_RMSE_Boost
+
+##All in all, Bagged model performs the best on our normalized response out of RF, Bagged, Boosted, LR models
+
+Test_RMSE_LSR 
+Test_RMSE_bagged
+Test_RMSE_RF
+Test_RMSE_Boost
+
+##Error rate
+
+error_rate_LSR = Test_RMSE_LSR/mean(final_data$g_viol_perc)
+print(error_rate_LSR)
+```
+
